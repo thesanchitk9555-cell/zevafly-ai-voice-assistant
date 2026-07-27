@@ -122,7 +122,7 @@ async def process_speech(request: Request):
 
     try:
         chat_completion = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=user_speech,
             config=types.GenerateContentConfig(
                 system_instruction=SIYA_SYSTEM_PROMPT,
