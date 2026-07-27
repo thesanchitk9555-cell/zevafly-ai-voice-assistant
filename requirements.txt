@@ -4,3 +4,4 @@ twilio
 google-genai
 python-dotenv
 requests
+python-multipart
