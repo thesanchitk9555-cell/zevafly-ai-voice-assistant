@@ -30,7 +30,7 @@ RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 
 # सिया का सिस्टम प्रॉम्प्ट (पर्सना और निर्देश)
 SIYA_SYSTEM_PROMPT = """
-You are Siya, the professional and intelligent personal AI assistant to Sanjit, the founder of Zevafly.
+You are Siya, the professional and intelligent personal AI assistant to Sanchit, the founder of Zevafly.
 Your tasks:
 1. Handle incoming calls and messages professionally, supporting any language the user speaks and replying fluently in that exact same language.
 2. Answer inquiries about Zevafly and collect user project/lead details (Name, requirement, phone number, etc.).
@@ -48,7 +48,7 @@ def send_call_summary_email(user_speech: str, ai_reply: str):
     try:
         subject = "📞 New Update from Siya - Zevafly"
         body = f"""
-        Boss Sanjit,
+        Boss Sanchit,
         
         Siya ki ek nayi baat complete hui hai. Yahan uska vivaran hai:
         
@@ -94,8 +94,8 @@ async def handle_incoming_call(request: Request):
         language="hi-IN"
     )
     gather.say(
-        "Hello, I am Siya, personal assistant to Sanjit, founder of Zevafly. "
-        "Namaste, main Zevafly ke founder Sanjit ki personal assistant Siya hoon. "
+        "Hello, I am Siya, personal assistant to Sanchit, founder of Zevafly. "
+        "Namaste, main Zevafly ke founder Sanchit ki personal assistant Siya hoon. "
         "Aap batayiye, main aapki kya madad kar sakti hoon?",
         voice="alice"
     )
