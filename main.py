@@ -187,15 +187,16 @@ async def whatsapp_reply(request: Request):
             ai_reply = "नमस्ते! मैं सिया हूँ, ज़ेवलाफ से। बताइए, मैं आपकी क्या मदद कर सकती हूँ?"
         else:
             lower_msg = incoming_msg.lower()
-            if "call karo" in lower_msg or "mujhe call" in lower_msg or "call lagao" in lower_msg:
+                        if "call karo" in lower_msg or "mujhe call" in lower_msg or "call lagao" in lower_msg:
                 phone_to_call = sender_number.replace("whatsapp:", "").strip()
                 if twilio_client and TWILIO_PHONE_NUMBER:
+                    # आउटगोइंग कॉल को सीधे आपके /voice राउट से जोड़ दिया है ताकि वह लगातार बात कर सके
                     twilio_client.calls.create(
                         to=phone_to_call,
                         from_=TWILIO_PHONE_NUMBER,
-                        twiml='<Response><Say language="hi-IN">नमस्ते! यह सिया का ऑटोमैटिक कॉल है। संचित जी के निर्देशानुसार आपको कॉल किया गया है। बताइए, मैं आपकी क्या सहायता कर सकती हूँ?</Say></Response>'
+                        url='https://zevafly-ai.onrender.com/voice'
                     )
-                    ai_reply = "मैंने आपके नंबर पर फोन कॉल मिला दिया है, कृपया अपना फोन उठाइए!"
+                    ai_reply = "मैंने आपके नंबर पर फोन कॉल मिला दिया है, कृपया अपना फोन उठाइए! (नोट: कॉल उठते ही अपने फोन कीपैड का कोई भी 1 बटन जरूर दबाएं)"
                 else:
                     ai_reply = "माफ कीजिए, कॉल करने के लिए Twilio सेटअप नहीं है।"
             else:
