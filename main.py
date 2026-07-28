@@ -174,7 +174,6 @@ async def whatsapp_reply(request: Request):
         logger.info(f"Siya WhatsApp replied: {ai_reply}")
 
         # चाहें तो व्हाट्सएप चैट का अपडेट भी जीमेल पर भेज सकते हैं
-        send_call_summary_email(incoming_msg, ai_reply)
 
     except Exception as e:
         logger.error(f"Error in WhatsApp Gemini API: {e}")
