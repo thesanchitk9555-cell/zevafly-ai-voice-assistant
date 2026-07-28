@@ -1,6 +1,5 @@
 import os
 import logging
-import resend
 from fastapi import FastAPI, Request, Response
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from twilio.twiml.messaging_response import MessagingResponse
@@ -39,10 +38,6 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN else None
 
-# ईमेल क्रेडेंशियल्स
-RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-
 SIYA_SYSTEM_PROMPT = """
 You are Siya, a professional, warm, and highly intelligent personal AI assistant to Sanjit, the founder of Zevafly.
 Your behavior:
@@ -73,29 +68,12 @@ def generate_with_fallback(contents: str, system_instruction: str):
             continue
     return None
 
-def send_summary_email(user_input: str, ai_reply: str, interaction_type: str):
-    """Resend API का उपयोग करके ईमेल समरी भेजना (Fix: Force verified sender)"""
-    if not RESEND_API_KEY or not RECEIVER_EMAIL:
-        return
-    resend.api_key = RESEND_API_KEY
-    try:
-        subject = f"📞 New {interaction_type} Update from Siya - Zevafly"
-        body = f"Boss Sanjit,\n\nSiya ki ek nayi {interaction_type} complete hui hai. Yahan uska vivaran hai:\n\n- User ne kya kaha: {user_input}\n- Siya ne kya jawab diya: {ai_reply}\n\nAapka AI Assistant,\nSiya (Zevafly)"
-        
-        # FIX: Send from the authorized resend testing email
-        sender = "onboarding@resend.dev"
-        params = {"from": sender, "to": [RECEIVER_EMAIL], "subject": subject, "text": body}
-        resend.Emails.send(params)
-        logger.info("Summary email sent successfully via Resend!")
-    except Exception as e:
-        logger.error(f"Failed to send email via Resend: {e}")
-
 @app.get("/")
 def home():
-    return {"status": "Siya AI Assistant (WhatsApp + Outgoing Call + Email) is active!"}
+    return {"status": "Siya AI Assistant (WhatsApp + Voice) is active!"}
 
 # ==========================================
-# 1. फोन कॉल राउट (WhatsApp से कॉल लगाने के बाद की बातचीत)
+# 1. फोन कॉल राउट
 # ==========================================
 @app.post("/voice")
 async def handle_incoming_call(request: Request):
@@ -137,7 +115,6 @@ async def process_speech(request: Request):
             ai_reply = "क्षमा करें, अभी सभी मॉडल्स की लिमिट पूरी हो चुकी है।"
         
         logger.info(f"Siya Voice replied: {ai_reply}")
-        send_summary_email(user_speech, ai_reply, "Phone Call")
 
     except Exception as e:
         logger.error(f"Error in Voice processing: {e}")
@@ -170,6 +147,7 @@ async def whatsapp_reply(request: Request):
             ai_reply = "नमस्ते! मैं सिया हूँ, ज़ेवलाफ से। बताइए, मैं आपकी क्या मदद कर सकती हूँ?"
         else:
             lower_msg = incoming_msg.lower()
+            # कॉल कमांड चेक करें
             if "call karo" in lower_msg or "mujhe call" in lower_msg or "call lagao" in lower_msg:
                 phone_to_call = sender_number.replace("whatsapp:", "").strip()
                 if twilio_client and TWILIO_PHONE_NUMBER:
@@ -183,13 +161,11 @@ async def whatsapp_reply(request: Request):
                 else:
                     ai_reply = "माफ कीजिए, कॉल करने के लिए Twilio सेटअप नहीं है।"
             else:
+                # नॉर्मल मैसेज का रिप्लाई
                 ai_reply = generate_with_fallback(incoming_msg, SIYA_SYSTEM_PROMPT)
                 if not ai_reply:
                     ai_reply = "क्षमा करें, अभी एआई की डेली लिमिट पूरी हो चुकी है।"
                 logger.info(f"Siya WhatsApp replied: {ai_reply}")
-                
-                # ईमेल समरी
-                send_summary_email(incoming_msg, ai_reply, "WhatsApp Chat")
 
     except Exception as e:
         logger.error(f"Error in WhatsApp processing: {e}")
