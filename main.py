@@ -1,8 +1,6 @@
 import os
 import logging
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import resend  # नया: Resend API के लिए
 from fastapi import FastAPI, Request, Response
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from twilio.twiml.messaging_response import MessagingResponse
@@ -24,14 +22,15 @@ app = FastAPI(title="Siya - Zevafly AI Assistant")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# मल्टी-मॉडल फॉलबैक लिस्ट (एक की लिमिट खत्म होने पर दूसरा काम करेगा)
+# मल्टी-मॉडल फॉलबैक लिस्ट
 MODELS_LIST = [
     'gemini-3.6-flash',
     'gemini-3.5-flash-lite',
     'gemini-3.1-flash-lite',
     'gemini-2.5-flash-lite',
     'gemini-2.5-flash',
-    'gemini-2.5-pro'
+    'gemini-2.5-pro',
+    'antigravity'
 ]
 
 # ट्विलियो क्लाइंट (कॉल करने के लिए)
@@ -40,10 +39,10 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN else None
 
-# जीमेल क्रेडेंशियल्स
+# ईमेल क्रेडेंशियल्स
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
-EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")  # नया: Resend API की
 
 # सिया का सिस्टम प्रॉम्प्ट
 SIYA_SYSTEM_PROMPT = """
@@ -79,45 +78,44 @@ def generate_with_fallback(contents: str, system_instruction: str):
     return None
 
 def send_summary_email(user_input: str, ai_reply: str, interaction_type: str):
-    if not SENDER_EMAIL or not EMAIL_APP_PASSWORD or not RECEIVER_EMAIL:
+    """
+    Resend API का उपयोग करके ईमेल समरी भेजना
+    """
+    if not RESEND_API_KEY or not RECEIVER_EMAIL:
+        logger.warning("Resend API Key ya Receiver Email missing hai.")
         return
+    
+    resend.api_key = RESEND_API_KEY
+
     try:
         subject = f"📞 New {interaction_type} Update from Siya - Zevafly"
-        body = f"""
-        Boss Sanchit,
-        
-        Siya ki ek nayi {interaction_type} complete hui hai. Yahan uska vivaran hai:
-        
-        - User ne kya kaha: {user_input}
-        - Siya ne kya jawab diya: {ai_reply}
-        
-        Aapka AI Assistant,
-        Siya (Zevafly)
-        """
-        msg = MIMEMultipart()
-        msg["From"] = SENDER_EMAIL
-        msg["To"] = RECEIVER_EMAIL
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain"))
+        body = f"Boss Sanchit,\n\nSiya ki ek nayi {interaction_type} complete hui hai. Yahan uska vivaran hai:\n\n- User ne kya kaha: {user_input}\n- Siya ne kya jawab diya: {ai_reply}\n\nAapka AI Assistant,\nSiya (Zevafly)"
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(SENDER_EMAIL, EMAIL_APP_PASSWORD)
-            server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
-            
-        logger.info("Summary email sent successfully!")
+        # Resend Testing के लिए डिफॉल्ट सेंडर
+        sender = SENDER_EMAIL if SENDER_EMAIL else "onboarding@resend.dev"
+
+        params = {
+            "from": sender,
+            "to": [RECEIVER_EMAIL],
+            "subject": subject,
+            "text": body,
+        }
+
+        email_response = resend.Emails.send(params)
+        logger.info(f"Summary email sent successfully via Resend!")
     except Exception as e:
-        logger.error(f"Failed to send email (Ignored): {e}")
+        logger.error(f"Failed to send email via Resend (Ignored): {e}")
 
 @app.get("/")
 def home():
-    return {"status": "Siya Multi-Model Fallback AI Assistant is active!"}
+    return {"status": "Siya Multi-Model (with Resend & 2-Way Calling) is active!"}
 
 # ==========================================
 # 1. फोन कॉल राउट (Voice Call Handling)
 # ==========================================
 @app.post("/voice")
 async def handle_incoming_call(request: Request):
-    logger.info("Incoming phone call received.")
+    logger.info("Incoming phone call received or outgoing call connected.")
     response = VoiceResponse()
     
     gather = Gather(
@@ -128,7 +126,7 @@ async def handle_incoming_call(request: Request):
         language="hi-IN"
     )
     gather.say(
-        "नमस्ते! मैं सिया हूँ, ज़ेवलाफ के फाउंडर संचित की पर्सनल असिस्टेंट। बताइए, मैं आपकी क्या मदद कर सकती हूँ?",
+        "नमस्ते! मैं सिया हूँ, ज़ेवलाफ के फाउंडर  संचित की पर्सनल असिस्टेंट। बताइए, मैं आपकी क्या मदद कर सकती हूँ?",
         voice="alice"
     )
     response.append(gather)
@@ -155,6 +153,8 @@ async def process_speech(request: Request):
             ai_reply = "क्षमा करें, अभी सभी मॉडल्स की लिमिट पूरी हो चुकी है।"
         
         logger.info(f"Siya Voice replied: {ai_reply}")
+        
+        # बैकग्राउंड में ईमेल भेजना
         send_summary_email(user_speech, ai_reply, "Phone Call")
 
     except Exception as e:
@@ -187,10 +187,11 @@ async def whatsapp_reply(request: Request):
             ai_reply = "नमस्ते! मैं सिया हूँ, ज़ेवलाफ से। बताइए, मैं आपकी क्या मदद कर सकती हूँ?"
         else:
             lower_msg = incoming_msg.lower()
-                        if "call karo" in lower_msg or "mujhe call" in lower_msg or "call lagao" in lower_msg:
+            if "call karo" in lower_msg or "mujhe call" in lower_msg or "call lagao" in lower_msg:
                 phone_to_call = sender_number.replace("whatsapp:", "").strip()
                 if twilio_client and TWILIO_PHONE_NUMBER:
-                    # आउटगोइंग कॉल को सीधे आपके /voice राउट से जोड़ दिया है ताकि वह लगातार बात कर सके
+                    
+                    # आउटगोइंग कॉल को सीधे आपके /voice राउट से जोड़ दिया है
                     twilio_client.calls.create(
                         to=phone_to_call,
                         from_=TWILIO_PHONE_NUMBER,
@@ -205,6 +206,8 @@ async def whatsapp_reply(request: Request):
                     ai_reply = "क्षमा करें, अभी एआई की डेली लिमिट पूरी हो चुकी है।"
                 
                 logger.info(f"Siya WhatsApp replied: {ai_reply}")
+                
+                # बैकग्राउंड में ईमेल भेजना
                 send_summary_email(incoming_msg, ai_reply, "WhatsApp Chat")
 
     except Exception as e:
