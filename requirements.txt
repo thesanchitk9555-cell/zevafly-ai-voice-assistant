@@ -6,5 +6,4 @@ python-dotenv
 requests
 python-multipart
 videosdk
-resend
 
