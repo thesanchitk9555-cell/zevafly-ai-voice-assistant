@@ -1,8 +1,8 @@
 import os
 import logging
 import resend
-import asyncio
 from fastapi import FastAPI, Request, Response
+from twilio.twiml.voice_response import VoiceResponse, Gather
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 from google import genai
@@ -33,19 +33,18 @@ MODELS_LIST = [
     'antigravity'
 ]
 
-# ट्विलियो (सिर्फ WhatsApp के लिए)
+# ट्विलियो (कॉल और WhatsApp के लिए)
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN else None
 
 # ईमेल क्रेडेंशियल्स
-SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 
 SIYA_SYSTEM_PROMPT = """
-You are Siya, a professional, warm, and highly intelligent personal AI assistant to Sanchit  , the founder of Zevafly.
+You are Siya, a professional, warm, and highly intelligent personal AI assistant to Sanjit, the founder of Zevafly.
 Your behavior:
 1. Talk like a real human being, naturally, politely, and conversationally. Never sound like a robot.
 2. Support any language the user speaks (Hindi, Hinglish, English) and reply fluently in that exact same language.
@@ -75,14 +74,16 @@ def generate_with_fallback(contents: str, system_instruction: str):
     return None
 
 def send_summary_email(user_input: str, ai_reply: str, interaction_type: str):
-    """Resend API का उपयोग करके ईमेल समरी भेजना"""
+    """Resend API का उपयोग करके ईमेल समरी भेजना (Fix: Force verified sender)"""
     if not RESEND_API_KEY or not RECEIVER_EMAIL:
         return
     resend.api_key = RESEND_API_KEY
     try:
         subject = f"📞 New {interaction_type} Update from Siya - Zevafly"
-        body = f"Boss Sanchit  ,\n\nSiya ki ek nayi {interaction_type} complete hui hai. Yahan uska vivaran hai:\n\n- User ne kya kaha: {user_input}\n- Siya ne kya jawab diya: {ai_reply}\n\nAapka AI Assistant,\nSiya (Zevafly)"
-        sender = SENDER_EMAIL if SENDER_EMAIL else "onboarding@resend.dev"
+        body = f"Boss Sanjit,\n\nSiya ki ek nayi {interaction_type} complete hui hai. Yahan uska vivaran hai:\n\n- User ne kya kaha: {user_input}\n- Siya ne kya jawab diya: {ai_reply}\n\nAapka AI Assistant,\nSiya (Zevafly)"
+        
+        # FIX: Send from the authorized resend testing email
+        sender = "onboarding@resend.dev"
         params = {"from": sender, "to": [RECEIVER_EMAIL], "subject": subject, "text": body}
         resend.Emails.send(params)
         logger.info("Summary email sent successfully via Resend!")
@@ -91,10 +92,71 @@ def send_summary_email(user_input: str, ai_reply: str, interaction_type: str):
 
 @app.get("/")
 def home():
-    return {"status": "Siya AI Assistant (WhatsApp + VideoSDK Voice) is active!"}
+    return {"status": "Siya AI Assistant (WhatsApp + Outgoing Call + Email) is active!"}
 
 # ==========================================
-# WhatsApp चैट राउट (सिर्फ WhatsApp हैंडल करेगा)
+# 1. फोन कॉल राउट (WhatsApp से कॉल लगाने के बाद की बातचीत)
+# ==========================================
+@app.post("/voice")
+async def handle_incoming_call(request: Request):
+    logger.info("Outgoing call connected.")
+    response = VoiceResponse()
+    
+    gather = Gather(
+        input="speech",
+        action="/process-speech",
+        method="POST",
+        speech_timeout="auto",
+        language="hi-IN"
+    )
+    gather.say(
+        "नमस्ते! मैं सिया हूँ, ज़ेवलाफ के फाउंडर संजित की पर्सनल असिस्टेंट। बताइए, मैं आपकी क्या मदद कर सकती हूँ?",
+        voice="alice"
+    )
+    response.append(gather)
+    response.redirect("/voice")
+    return Response(content=str(response), media_type="application/xml")
+
+@app.post("/process-speech")
+async def process_speech(request: Request):
+    form_data = await request.form()
+    user_speech = form_data.get("SpeechResult", "").strip()
+    logger.info(f"Caller said: {user_speech}")
+
+    response = VoiceResponse()
+
+    if not user_speech:
+        gather = Gather(input="speech", action="/process-speech", method="POST", speech_timeout="auto")
+        gather.say("क्षमा करें, मैंने आपकी बात ठीक से सुनी नहीं। क्या आप दोबारा दोहरा सकते हैं?", voice="alice")
+        response.append(gather)
+        return Response(content=str(response), media_type="application/xml")
+
+    try:
+        ai_reply = generate_with_fallback(user_speech, SIYA_SYSTEM_PROMPT)
+        if not ai_reply:
+            ai_reply = "क्षमा करें, अभी सभी मॉडल्स की लिमिट पूरी हो चुकी है।"
+        
+        logger.info(f"Siya Voice replied: {ai_reply}")
+        send_summary_email(user_speech, ai_reply, "Phone Call")
+
+    except Exception as e:
+        logger.error(f"Error in Voice processing: {e}")
+        ai_reply = "अभी थोड़ा नेटवर्क इशू है, मैं एक मिनट में आपसे दोबारा जुड़ती हूँ।"
+
+    gather = Gather(
+        input="speech",
+        action="/process-speech",
+        method="POST",
+        speech_timeout="auto"
+    )
+    gather.say(ai_reply, voice="alice")
+    response.append(gather)
+    
+    return Response(content=str(response), media_type="application/xml")
+
+
+# ==========================================
+# 2. WhatsApp चैट राउट
 # ==========================================
 @app.post("/whatsapp")
 async def whatsapp_reply(request: Request):
@@ -107,11 +169,27 @@ async def whatsapp_reply(request: Request):
         if not incoming_msg:
             ai_reply = "नमस्ते! मैं सिया हूँ, ज़ेवलाफ से। बताइए, मैं आपकी क्या मदद कर सकती हूँ?"
         else:
-            ai_reply = generate_with_fallback(incoming_msg, SIYA_SYSTEM_PROMPT)
-            if not ai_reply:
-                ai_reply = "क्षमा करें, अभी एआई की डेली लिमिट पूरी हो चुकी है।"
-            logger.info(f"Siya WhatsApp replied: {ai_reply}")
-            send_summary_email(incoming_msg, ai_reply, "WhatsApp Chat")
+            lower_msg = incoming_msg.lower()
+            if "call karo" in lower_msg or "mujhe call" in lower_msg or "call lagao" in lower_msg:
+                phone_to_call = sender_number.replace("whatsapp:", "").strip()
+                if twilio_client and TWILIO_PHONE_NUMBER:
+                    # आउटगोइंग कॉल राउटिंग
+                    twilio_client.calls.create(
+                        to=phone_to_call,
+                        from_=TWILIO_PHONE_NUMBER,
+                        url='https://zevafly-ai.onrender.com/voice'
+                    )
+                    ai_reply = "मैंने आपके नंबर पर फोन कॉल मिला दिया है, कृपया अपना फोन उठाइए! (नोट: कॉल उठते ही अपने फोन कीपैड का कोई भी 1 बटन जरूर दबाएं)"
+                else:
+                    ai_reply = "माफ कीजिए, कॉल करने के लिए Twilio सेटअप नहीं है।"
+            else:
+                ai_reply = generate_with_fallback(incoming_msg, SIYA_SYSTEM_PROMPT)
+                if not ai_reply:
+                    ai_reply = "क्षमा करें, अभी एआई की डेली लिमिट पूरी हो चुकी है।"
+                logger.info(f"Siya WhatsApp replied: {ai_reply}")
+                
+                # ईमेल समरी
+                send_summary_email(incoming_msg, ai_reply, "WhatsApp Chat")
 
     except Exception as e:
         logger.error(f"Error in WhatsApp processing: {e}")
